@@ -1,0 +1,18 @@
+onnx2dl/
+
+# Build outputs
+daemon/01_daemon_skeleton/exam_daemon
+daemon/01_daemon_skeleton/process
+daemon/01_daemon_skeleton/scheduling_daemon
+daemon/01_daemon_skeleton/shared_memory_region_sample
+
+# Local backup for nested git metadata
+.nested_git_backup/
+
+# Temporary/runtime files
+*.o
+*.out
+*.log
+core
+core.*
+
