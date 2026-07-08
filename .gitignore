@@ -1,10 +1,22 @@
 onnx2dl/
 
 # Build outputs
-daemon/01_daemon_skeleton/exam_daemon
-daemon/01_daemon_skeleton/process
-daemon/01_daemon_skeleton/scheduling_daemon
-daemon/01_daemon_skeleton/shared_memory_region_sample
+daemon/exam_daemon
+daemon/process
+daemon/resnet18_process
+daemon/scheduling_daemon
+daemon/shared_memory_region_sample
+daemon/build_sample_model
+
+# TensorRT worker artifacts: keep only curated sample/resnet18 fixtures.
+daemon/artifacts/*
+!daemon/artifacts/sample_model/
+!daemon/artifacts/sample_model/**
+!daemon/artifacts/resnet18/
+!daemon/artifacts/resnet18/**
+
+# Legacy nested copy after moving the TensorRT worker to daemon/.
+daemon/02_TensorRT_GPU_worker/
 
 # Local backup for nested git metadata
 .nested_git_backup/
@@ -15,4 +27,3 @@ daemon/01_daemon_skeleton/shared_memory_region_sample
 *.log
 core
 core.*
-

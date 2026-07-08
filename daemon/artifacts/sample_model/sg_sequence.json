@@ -1,0 +1,54 @@
+[
+  {
+    "label": "fake_resnet_stem",
+    "mock": {
+      "path": "mock/fake_resnet_sg1.txt",
+      "input": { "shape": [256], "dtype": "bytes" },
+      "output": { "shape": [256], "dtype": "bytes" }
+    },
+    "tensor_rt_gpu": {
+      "path": "tensor_rt_gpu/fake_resnet_sg1.plan",
+      "input": { "shape": [1, 4], "dtype": "float32" },
+      "output": { "shape": [1, 4], "dtype": "float32" }
+    }
+  },
+  {
+    "label": "fake_resnet_block1",
+    "mock": {
+      "path": "mock/fake_resnet_sg2.txt",
+      "input": { "shape": [256], "dtype": "bytes" },
+      "output": { "shape": [256], "dtype": "bytes" }
+    },
+    "tensor_rt_gpu": {
+      "path": "tensor_rt_gpu/fake_resnet_sg2.plan",
+      "input": { "shape": [1, 4], "dtype": "float32" },
+      "output": { "shape": [1, 4], "dtype": "float32" }
+    }
+  },
+  {
+    "label": "fake_resnet_block2",
+    "mock": {
+      "path": "mock/fake_resnet_sg3.txt",
+      "input": { "shape": [256], "dtype": "bytes" },
+      "output": { "shape": [256], "dtype": "bytes" }
+    },
+    "tensor_rt_gpu": {
+      "path": "tensor_rt_gpu/fake_resnet_sg3.plan",
+      "input": { "shape": [1, 4], "dtype": "float32" },
+      "output": { "shape": [1, 4], "dtype": "float32" }
+    }
+  },
+  {
+    "label": "fake_resnet_classifier",
+    "mock": {
+      "path": "mock/fake_resnet_sg4.txt",
+      "input": { "shape": [256], "dtype": "bytes" },
+      "output": { "shape": [256], "dtype": "bytes" }
+    },
+    "tensor_rt_gpu": {
+      "path": "tensor_rt_gpu/fake_resnet_sg4.plan",
+      "input": { "shape": [1, 4], "dtype": "float32" },
+      "output": { "shape": [1, 4], "dtype": "float32" }
+    }
+  }
+]
