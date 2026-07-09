@@ -129,20 +129,30 @@ void Worker::run_loop() {
                     throw std::runtime_error("worker assignment is incomplete");
                 }
 
-                Channel channel(assigned_request_.channel_name_string());
+                const bool is_first_sg = assigned_sg_->is_first();
+                const bool is_last_sg = assigned_sg_->is_last();
 
-                if (assigned_sg_->is_first()) {
+                if (is_first_sg && is_last_sg) {
+                    Channel channel(assigned_request_.channel_name_string());
                     set_input(channel.read_input());
-                }
-
-                execute();
-
-                if (assigned_sg_->is_last()) {
+                    execute();
                     channel.write_output(get_output());
+                } else {
+                    if (is_first_sg) {
+                        Channel channel(assigned_request_.channel_name_string());
+                        set_input(channel.read_input());
+                    }
+
+                    execute();
+
+                    if (is_last_sg) {
+                        Channel channel(assigned_request_.channel_name_string());
+                        channel.write_output(get_output());
+                    }
                 }
 
                 Event complete_event =
-                    assigned_sg_->is_last()
+                    is_last_sg
                         ? Event::create_request_complete_event(assigned_request_)
                         : Event::create_sg_complete_event(assigned_request_);
 

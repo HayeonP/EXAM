@@ -6,6 +6,7 @@
 #include "ipc/process_shared_synchronizer.hpp"
 
 #include <cerrno>
+#include <chrono>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -15,9 +16,11 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <pthread.h>
 #include <regex>
 #include <signal.h>
+#include <sstream>
 #include <stdexcept>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -46,6 +49,12 @@ void initialize_event_queue(EventQueue* queue) {
     queue->initialized = true;
 }
 
+std::int64_t elapsed_microseconds(
+    std::chrono::steady_clock::time_point start_time) {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - start_time).count();
+}
+
 void cleanup_regions_with_pid_prefix(const char* fs_prefix, std::size_t fs_prefix_len) {
     DIR* dir = opendir("/dev/shm");
     if (dir == nullptr) {
@@ -72,10 +81,14 @@ void cleanup_regions_with_pid_prefix(const char* fs_prefix, std::size_t fs_prefi
     closedir(dir);
 }
 
-void cleanup_stale_shared_memory() {
-    SharedMemoryRegion::unlink_noexcept(EVENT_QUEUE_SHM_NAME);
+void cleanup_client_regions() {
     cleanup_regions_with_pid_prefix("exam_channel_", 13);
     cleanup_regions_with_pid_prefix("exam_client_control_", 20);
+}
+
+void cleanup_stale_shared_memory() {
+    SharedMemoryRegion::unlink_noexcept(EVENT_QUEUE_SHM_NAME);
+    cleanup_client_regions();
 }
 
 std::string make_client_control_name_from_channel_name(const std::string& channel_name) {
@@ -504,9 +517,6 @@ int ExamDaemon::run_loop() {
                 break;
         }
 
-        cleanup_regions_with_pid_prefix("exam_channel_", 13);
-        cleanup_regions_with_pid_prefix("exam_client_control_", 20);
-        cleanup_inactive_clients();
     }
 }
 
@@ -564,10 +574,20 @@ void ExamDaemon::handle_sg_complete_event(const Event& event) {
         return;
     }
 
-    std::cout << "daemon: SG complete request=" << request.request_id
-              << " channel=" << channel_name << '\n';
+    RequestContext& request_context = it->second;
+    const auto sg_latency_us =
+        elapsed_microseconds(request_context.sg_started_at);
 
-    it->second.sg_running = false;
+    {
+        std::ostringstream log;
+        log << "daemon: SG complete request=" << request.request_id
+            << " channel=" << channel_name
+            << " sg=" << request_context.running_sg_id
+            << " sg_latency_us=" << sg_latency_us << '\n';
+        std::cout << log.str();
+    }
+
+    request_context.sg_running = false;
     dispatch_next_sg();
 }
 
@@ -584,12 +604,20 @@ void ExamDaemon::handle_request_complete_event(const Event& event) {
     }
 
     try {
-        std::cout << "daemon: request complete request=" << request.request_id
-                  << " channel=" << channel_name << '\n';
+        RequestContext& request_context = it->second;
+        const auto sg_latency_us =
+            elapsed_microseconds(request_context.sg_started_at);
+
+        {
+            std::ostringstream log;
+            log << "daemon: request complete request=" << request.request_id
+                << " channel=" << channel_name
+                << " sg=" << request_context.running_sg_id
+                << " sg_latency_us=" << sg_latency_us << '\n';
+            std::cout << log.str();
+        }
         active_request_map_.erase(it);
-        ClientControl client_control(
-            make_client_control_name_from_channel_name(channel_name));
-        client_control.complete_request();        
+        complete_client_request(channel_name);
     } catch (const std::exception& e) {
         std::cerr << "daemon: request complete failed: " << e.what() << '\n';
     }
@@ -616,6 +644,8 @@ void ExamDaemon::handle_register_client_event(const Event& event) {
     ClientContext client_context{};
     client_context.channel_name = channel_name;
     client_context.sg_sequence_file_path = sg_sequence_file_path;
+    client_context.client_control = std::make_unique<ClientControl>(
+        make_client_control_name_from_channel_name(channel_name));
     // TODO: Replace this line-based parser after the official SG sequence format is fixed.
     client_context.sg_sequence = load_sg_sequence_from_file(sg_sequence_file_path);
     if (client_context.sg_sequence.empty()) {
@@ -634,9 +664,7 @@ void ExamDaemon::handle_register_client_event(const Event& event) {
               << '\n';
 
     try {
-        ClientControl client_control(
-            make_client_control_name_from_channel_name(channel_name));
-        client_control.complete_request();
+        complete_client_request(channel_name);
     } catch (const std::exception& e) {
         std::cerr << "daemon: failed to acknowledge client registration: "
                   << e.what() << '\n';
@@ -647,12 +675,16 @@ void ExamDaemon::handle_unregister_client_event(const Event& event) {
     const std::string channel_name = event.request.channel_name_string();
     auto client_it = active_client_map_.find(channel_name);
     if (client_it == active_client_map_.end()) {
+        cleanup_client_regions();
+        cleanup_inactive_clients();
         return;
     }
 
     if (client_has_active_request(channel_name)) {
         std::cerr << "daemon: defer unregister for active client channel="
                   << channel_name << '\n';
+        cleanup_client_regions();
+        cleanup_inactive_clients();
         return;
     }
 
@@ -668,6 +700,20 @@ void ExamDaemon::handle_unregister_client_event(const Event& event) {
         release_client_resources(client_it->second);
     }
     active_client_map_.erase(client_it);
+    cleanup_client_regions();
+    cleanup_inactive_clients();
+}
+
+void ExamDaemon::complete_client_request(const std::string& channel_name) {
+    auto client_it = active_client_map_.find(channel_name);
+    if (client_it != active_client_map_.end() && client_it->second.client_control) {
+        client_it->second.client_control->complete_request();
+        return;
+    }
+
+    ClientControl client_control(
+        make_client_control_name_from_channel_name(channel_name));
+    client_control.complete_request();
 }
 
 const char* ExamDaemon::scheduling_policy_name() const {
@@ -775,13 +821,19 @@ void ExamDaemon::dispatch_next_sg() {
 
         const Subgraph& sg = candidate.request_context->take_next_sg();
         candidate.request_context->sg_running = true;
+        candidate.request_context->running_sg_id = sg.id();
+        candidate.request_context->sg_started_at = std::chrono::steady_clock::now();
 
-        std::cout << "daemon: launch SG channel="
-                  << candidate.request_context->channel_name
-                  << " request="
-                  << candidate.request_context->request.request_id
-                  << " sg=" << sg.id()
-                  << " worker=" << candidate.worker->name() << '\n';
+        {
+            std::ostringstream log;
+            log << "daemon: launch SG channel="
+                << candidate.request_context->channel_name
+                << " request="
+                << candidate.request_context->request.request_id
+                << " sg=" << sg.id()
+                << " worker=" << candidate.worker->name() << '\n';
+            std::cout << log.str();
+        }
 
         launch(*candidate.worker, candidate.request_context->request, sg);
     }

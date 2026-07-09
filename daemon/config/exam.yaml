@@ -1,0 +1,4 @@
+cpu_affinity:
+  daemon: [1]
+  tensor_rt_gpu_worker: [2]
+  pytorch_worker: [3, 4, 5, 6]

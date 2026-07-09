@@ -1,7 +1,9 @@
 #include "thread_config.hpp"
 
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <pthread.h>
 #include <sched.h>
 #include <sstream>
@@ -11,8 +13,27 @@
 namespace exam {
 namespace {
 
+std::mutex& thread_config_log_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
 std::string thread_error_message(int rc) {
     return std::strerror(rc);
+}
+
+bool sched_fifo_disabled() {
+    const char* value = std::getenv("EXAM_DISABLE_SCHED_FIFO");
+    if (value == nullptr || value[0] == '\0') {
+        return false;
+    }
+
+    const std::string parsed(value);
+    return parsed != "0"
+        && parsed != "false"
+        && parsed != "False"
+        && parsed != "off"
+        && parsed != "OFF";
 }
 
 std::string cpu_list_to_string(const std::vector<int>& cpu_ids) {
@@ -32,11 +53,18 @@ void ThreadConfig::set_priority(const char* name, int priority) {
     if (priority <= 0) {
         return;
     }
+    if (sched_fifo_disabled()) {
+        std::lock_guard<std::mutex> lock(thread_config_log_mutex());
+        std::cerr << name << ": SCHED_FIFO priority " << priority
+                  << " skipped by EXAM_DISABLE_SCHED_FIFO\n";
+        return;
+    }
 
     sched_param param{};
     param.sched_priority = priority;
     const int rc = pthread_setschedparam(pthread_self(), SCHED_FIFO, &param);
     if (rc != 0) {
+        std::lock_guard<std::mutex> lock(thread_config_log_mutex());
         std::cerr << name << ": SCHED_FIFO priority " << priority
                   << " was not applied: " << thread_error_message(rc)
                   << " (run with CAP_SYS_NICE/root for strict wakeup ordering)\n";
@@ -71,6 +99,7 @@ void ThreadConfig::bind_to_cpus(const char* name, const std::vector<int>& cpu_id
 
     const int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
     if (rc != 0) {
+        std::lock_guard<std::mutex> lock(thread_config_log_mutex());
         std::cerr << name << ": CPU binding to cpus [" << cpu_list_to_string(cpu_ids)
                   << "] was not applied: " << thread_error_message(rc) << '\n';
     }

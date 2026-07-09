@@ -7,7 +7,10 @@
 #include "ipc/shared_memory_region.hpp"
 #include "worker.hpp"
 
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -34,6 +37,7 @@ private:
         std::string channel_name;
         std::string sg_sequence_file_path;
         std::vector<Subgraph> sg_sequence;
+        std::unique_ptr<ClientControl> client_control;
     };
 
     class RequestContext {
@@ -43,6 +47,8 @@ private:
         const std::vector<Subgraph>* sg_sequence{nullptr};
         std::size_t next_sg_index{0};
         bool sg_running{false};
+        std::uint32_t running_sg_id{0};
+        std::chrono::steady_clock::time_point sg_started_at{};
 
         bool has_next_sg() const;
         const Subgraph& peek_next_sg() const;
@@ -62,6 +68,7 @@ private:
     void handle_request_complete_event(const Event& event);
     void handle_register_client_event(const Event& event);
     void handle_unregister_client_event(const Event& event);
+    void complete_client_request(const std::string& channel_name);
     const char* scheduling_policy_name() const;
     DispatchCandidate select_dispatch_candidate();
     DispatchCandidate select_dispatch_candidate_mock_fifo();

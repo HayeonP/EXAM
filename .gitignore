@@ -4,6 +4,7 @@ onnx2dl/
 daemon/exam_daemon
 daemon/process
 daemon/resnet18_process
+daemon/resnet18_pytorch_direct
 daemon/scheduling_daemon
 daemon/shared_memory_region_sample
 daemon/build_sample_model
@@ -15,6 +16,9 @@ daemon/artifacts/*
 !daemon/artifacts/resnet18/
 !daemon/artifacts/resnet18/**
 
+# Generated from daemon/artifacts/resnet18/pytorch/*.pt by the test scripts.
+daemon/artifacts/resnet18/pytorch_ts/
+
 # Legacy nested copy after moving the TensorRT worker to daemon/.
 daemon/02_TensorRT_GPU_worker/
 
@@ -22,6 +26,9 @@ daemon/02_TensorRT_GPU_worker/
 .nested_git_backup/
 
 # Temporary/runtime files
+__pycache__/
+*.py[cod]
+.pytest_cache/
 *.o
 *.out
 *.log

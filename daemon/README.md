@@ -4,17 +4,26 @@
 
 | Script | Summary |
 | --- | --- |
-| `01_run_single_process_test.sh` | Builds the project and runs one client request through the configured SG sequence. |
-| `02_run_two_process_test.sh` | Runs two clients against the same SG sequence to check multi-client scheduling and cache reuse. |
-| `03_run_resnet18_three_process_test.sh` | Runs three ResNet18 clients with different deterministic inputs under `mock-fifo`. |
-| `04_run_resnet18_three_process_interleave_test.sh` | Forces ResNet18 SG-level interleaving and verifies interleaved output hashes match sequential baselines. |
+| `01_run_resnet18_three_process_fifo_test.sh` | ResNet18 three-client FIFO scheduling test. |
+| `02_run_resnet18_three_process_interleave_test.sh` | ResNet18 three-client interleaving scheduling test. |
+| `03_run_resnet18_pytorch_tensorrt_interleave_test.sh` | PyTorch client & TensorRT GPU client interleaving test. |
+| `04_compare_resnet18_response_time.sh` | PyTorch vs LibTorch vs EXAM latency test. |
+| `terminate.sh` | Stop EXAM processes and SHM. |
+
+## Optional Backends
+
+| Backend | Summary |
+| --- | --- |
+| `pytorch` | Optional LibTorch worker. |
 
 ## Apps
 
 | App | Summary |
 | --- | --- |
-| `exam_daemon_main.cpp` | Starts `ExamDaemon` with TensorRT GPU and mock workers, using the requested scheduling policy. |
-| `process.cpp` | Generic sample client that registers an SG sequence, submits requests, waits, and prints text-oriented output. |
-| `resnet18_process.cpp` | ResNet18 client that sends deterministic float32 inputs and prints input/output hashes. |
-| `build_sample_model.cpp` | Generates the fake sample model artifacts, including mock files, TensorRT plans, and `sg_sequence.json`. |
-| `shared_memory_region_sample.cpp` | Demonstrates shared-memory create/open/read/write/unlink behavior. |
+| `exam_daemon_main.cpp` | Daemon entrypoint. |
+| `process.cpp` | Generic sample client. |
+| `resnet18_process.cpp` | ResNet18 hash client. |
+| `resnet18_pytorch_direct.cpp` | Direct LibTorch runner. |
+| `resnet18_pytorch_direct.py` | Direct Python runner. |
+| `build_sample_model.cpp` | Sample artifact builder. |
+| `shared_memory_region_sample.cpp` | SHM API sample. |

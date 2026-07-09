@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
 #include <exception>
 #include <fstream>
 #include <iomanip>
@@ -48,6 +49,15 @@ std::string optional_arg(int argc, char** argv, int index) {
     }
 
     return argv[index];
+}
+
+int parse_repeat_count(int argc, char** argv) {
+    if (argc < 6) {
+        return 1;
+    }
+
+    const int count = std::atoi(argv[5]);
+    return count > 0 ? count : 1;
 }
 
 std::uint64_t fnv1a64(const std::vector<char>& bytes) {
@@ -124,6 +134,7 @@ int main(int argc, char** argv) {
             parse_sg_sequence_file_path(argc, argv);
         const std::string ready_dir = optional_arg(argc, argv, 3);
         const std::string gate_path = optional_arg(argc, argv, 4);
+        const int repeat_count = parse_repeat_count(argc, argv);
 
         exam::ExamClient client(
             sg_sequence_file_path,
@@ -135,24 +146,36 @@ int main(int argc, char** argv) {
                   << " channel=" << client.channel_name()
                   << " input_size=" << RESNET18_INPUT_BYTES
                   << " output_size=" << RESNET18_OUTPUT_BYTES
+                  << " repeat_count=" << repeat_count
                   << " sg_sequence_file=" << sg_sequence_file_path << '\n';
 
         create_ready_file(ready_dir, input_id);
         wait_for_gate(gate_path);
 
-        exam::Payload input = make_resnet18_input(input_id);
-        const std::string input_hash = hex64(fnv1a64(input.bytes));
-        if (!client.request(input)) {
-            std::cerr << "resnet18_process input_id=" << input_id
-                      << " request dropped\n";
-            return 2;
-        }
+        for (int iteration = 0; iteration < repeat_count; ++iteration) {
+            const int iteration_input_id = input_id + iteration;
+            exam::Payload input = make_resnet18_input(iteration_input_id);
+            const std::string input_hash = hex64(fnv1a64(input.bytes));
+            const auto start_time = std::chrono::steady_clock::now();
+            if (!client.request(input)) {
+                std::cerr << "resnet18_process input_id=" << iteration_input_id
+                          << " iteration=" << iteration
+                          << " request dropped\n";
+                return 2;
+            }
 
-        exam::Payload output = client.wait();
-        std::cout << "RESULT input_id=" << input_id
-                  << " input_hash=" << input_hash
-                  << " output_hash=" << hex64(fnv1a64(output.bytes))
-                  << " output_size=" << output.bytes.size() << '\n';
+            exam::Payload output = client.wait();
+            const auto end_time = std::chrono::steady_clock::now();
+            const auto latency_us =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    end_time - start_time).count();
+            std::cout << "RESULT input_id=" << iteration_input_id
+                      << " iteration=" << iteration
+                      << " input_hash=" << input_hash
+                      << " output_hash=" << hex64(fnv1a64(output.bytes))
+                      << " output_size=" << output.bytes.size()
+                      << " latency_us=" << latency_us << '\n';
+        }
 
         return 0;
     } catch (const std::exception& e) {
