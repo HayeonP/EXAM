@@ -1,9 +1,30 @@
 #!/bin/bash
 set -euo pipefail
 
+# Usage: VAR=value ./04_compare_pytorch_direct_vs_worker_response_time.sh
+# Inputs:
+#   ITERATIONS: measured execution count.
+#   WARMUP: warmup execution count.
+#   PYTORCH_NUM_THREADS: PyTorch intra-op thread count.
+#   PYTORCH_INTEROP_THREADS: PyTorch inter-op thread count.
+#   SCHED_FIFO: 1 enables sudo/SCHED_FIFO, 0 disables it.
+#   DIRECT_SCHED_FIFO_PRIORITY: direct runner FIFO priority.
+#   INPUT_ID: direct/worker input id.
+#   PYTORCH_SG_SEQUENCE_PATH: PyTorch SG sequence JSON path.
+#   PYTORCH_DIR: TorchScript module directory.
+#   CONDA_ENV_PREFIX: conda env prefix for Python direct.
+#   DAEMON_LOG: worker daemon log file path.
+#   DIRECT_LOG: Python direct log file path.
+#   CPP_DIRECT_LOG: C++ direct log file path.
+#   WORKER_LOG: worker process log file path.
+#   VERBOSE: 1 prints captured logs.
+#   RUN_ORDER: direct-first or worker-first.
+#   EXAM_CONFIG_PATH: config YAML path and daemon config.
+#   LD_LIBRARY_PATH: runtime library search path.
+
 cd "$(dirname "$0")"
 
-source ./scripts/realtime_sudo.sh
+source ./scripts/sudo_helpers.sh
 
 default_config_path() {
     if [[ -n "${EXAM_CONFIG_PATH:-}" ]]; then
@@ -91,8 +112,7 @@ if [[ -z "$DIRECT_SCHED_FIFO_PRIORITY" ]]; then
 fi
 INPUT_ID=${INPUT_ID:-300}
 PYTORCH_SG_SEQUENCE_PATH=${PYTORCH_SG_SEQUENCE_PATH:-artifacts/resnet18/sg_sequence_pytorch.json}
-PYTORCH_PICKLE_DIR=${PYTORCH_PICKLE_DIR:-artifacts/resnet18/pytorch}
-PYTORCH_TS_DIR=${PYTORCH_TS_DIR:-artifacts/resnet18/pytorch_ts}
+PYTORCH_DIR=${PYTORCH_DIR:-artifacts/resnet18/pytorch}
 CONDA_ENV_PREFIX=${CONDA_ENV_PREFIX:-/home/rubis/workspace/miniconda3/envs/exam}
 DAEMON_LOG=${DAEMON_LOG:-/tmp/exam_daemon_pytorch_response_time.log}
 DIRECT_LOG=${DIRECT_LOG:-/tmp/exam_pytorch_direct_response_time.log}
@@ -177,40 +197,17 @@ ensure_exam_env() {
     fi
 }
 
-ensure_pytorch_torchscript_artifacts() {
-    if [[ -f "$PYTORCH_TS_DIR/sg1.pt" \
-        && -f "$PYTORCH_TS_DIR/sg2.pt" \
-        && -f "$PYTORCH_TS_DIR/sg3.pt" ]]; then
-        return
+ensure_pytorch_artifacts() {
+    local missing=0
+    for artifact in sg1.pt sg2.pt sg3.pt; do
+        if [[ ! -f "$PYTORCH_DIR/$artifact" ]]; then
+            echo "missing PyTorch TorchScript artifact: $PYTORCH_DIR/$artifact" >&2
+            missing=1
+        fi
+    done
+    if [[ "$missing" -ne 0 ]]; then
+        exit 1
     fi
-
-    echo "[04] exporting PyTorch TorchScript SG artifacts..."
-    PYTORCH_PICKLE_DIR="$PYTORCH_PICKLE_DIR" \
-    PYTORCH_TS_DIR="$PYTORCH_TS_DIR" \
-    PYTHONNOUSERSITE=1 \
-    "$CONDA_ENV_PREFIX/bin/python" <<'PY'
-import os
-import torch
-
-source_dir = os.environ["PYTORCH_PICKLE_DIR"]
-target_dir = os.environ["PYTORCH_TS_DIR"]
-samples = {
-    "sg1": torch.randn(1, 3, 224, 224),
-    "sg2": torch.randn(1, 64, 56, 56),
-    "sg3": torch.randn(1, 256, 14, 14),
-}
-
-os.makedirs(target_dir, exist_ok=True)
-for name, sample in samples.items():
-    source = os.path.join(source_dir, f"{name}.pt")
-    target = os.path.join(target_dir, f"{name}.pt")
-    model = torch.load(source, map_location="cpu")
-    model.eval()
-    with torch.no_grad():
-        traced = torch.jit.trace(model, sample, strict=False)
-        traced = torch.jit.freeze(traced.eval())
-        traced.save(target)
-PY
 }
 
 has_pytorch_enabled_daemon() {
@@ -268,7 +265,7 @@ run_direct() {
         "$CONDA_ENV_PREFIX/bin/python" \
         apps/resnet18_pytorch_direct.py \
         "$INPUT_ID" \
-        "$PYTORCH_TS_DIR" \
+        "$PYTORCH_DIR" \
         "$WARMUP" \
         "$ITERATIONS" \
         > "$DIRECT_LOG" 2>&1
@@ -293,7 +290,7 @@ run_cpp_direct() {
         EXAM_TORCH_JIT_NUM_PROFILED_RUNS=1 \
         ./resnet18_pytorch_direct \
             "$INPUT_ID" \
-            "$PYTORCH_TS_DIR" \
+            "$PYTORCH_DIR" \
             "$WARMUP" \
             "$ITERATIONS" \
             > "$CPP_DIRECT_LOG" 2>&1
@@ -635,7 +632,7 @@ print_logs() {
 }
 
 ensure_exam_env
-ensure_pytorch_torchscript_artifacts
+ensure_pytorch_artifacts
 ensure_built
 case "$RUN_ORDER" in
     direct-first)

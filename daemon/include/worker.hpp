@@ -35,12 +35,16 @@ public:
 
     void start(EventQueue* event_queue);
     void stop();
-    void assign(const Request& request, const Subgraph& sg);
+    void assign(
+        const Request& request,
+        const Subgraph& sg,
+        Worker* migration_source_worker = nullptr);
     virtual void release_sg_cache(const Subgraph& sg);
 
 protected:
     const Request& current_request() const;
     const Subgraph& current_sg() const;
+    bool has_prepared_input() const;
 
     virtual void init() = 0;
     virtual void set_input(const Payload& input) = 0;
@@ -49,6 +53,13 @@ protected:
     virtual void terminate() = 0;
 
 private:
+    void prepare_input();
+    void handle_first_sg();
+    void handle_last_sg();
+    void tensor_migration(Worker& migration_source_worker);
+    void retain_output_for_migration();
+    void release_output_for_migration() noexcept;
+    void release_migration_source() noexcept;
     void run_loop();
 
     std::uint32_t id_;
@@ -61,6 +72,9 @@ private:
     EventQueue* event_queue_{nullptr};
     Request assigned_request_{};
     const Subgraph* assigned_sg_{nullptr};
+    Worker* migration_source_worker_{nullptr};
+    std::uint32_t migration_retain_count_{0};
+    bool input_prepared_{false};
     bool has_assignment_{false};
     bool running_{false};
     bool stopping_{false};

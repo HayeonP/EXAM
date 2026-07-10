@@ -2,25 +2,22 @@ onnx2dl/
 
 # Build outputs
 daemon/exam_daemon
-daemon/process
 daemon/resnet18_process
 daemon/resnet18_pytorch_direct
-daemon/scheduling_daemon
 daemon/shared_memory_region_sample
-daemon/build_sample_model
 
-# TensorRT worker artifacts: keep only curated sample/resnet18 fixtures.
+# Example artifacts.
 daemon/artifacts/*
-!daemon/artifacts/sample_model/
-!daemon/artifacts/sample_model/**
+!daemon/artifacts/image/
+!daemon/artifacts/image/**
 !daemon/artifacts/resnet18/
 !daemon/artifacts/resnet18/**
 
-# Generated from daemon/artifacts/resnet18/pytorch/*.pt by the test scripts.
-daemon/artifacts/resnet18/pytorch_ts/
-
 # Legacy nested copy after moving the TensorRT worker to daemon/.
 daemon/02_TensorRT_GPU_worker/
+
+# Local scratch artifacts.
+daemon/tmp/
 
 # Local backup for nested git metadata
 .nested_git_backup/

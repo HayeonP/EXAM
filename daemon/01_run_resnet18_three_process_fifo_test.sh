@@ -1,19 +1,42 @@
 #!/bin/bash
 set -euo pipefail
 
+# Usage: VAR=value ./01_run_resnet18_three_process_fifo_test.sh
+# Inputs:
+#   DAEMON_LOG: exam_daemon log file path.
+#   PROCESS_1_LOG: process 1 log file path.
+#   PROCESS_2_LOG: process 2 log file path.
+#   PROCESS_3_LOG: process 3 log file path.
+#   SG_SEQUENCE_PATH: TensorRT SG sequence JSON path.
+#   SCHED_FIFO: 1 enables sudo/SCHED_FIFO, 0 disables it.
+#   VERBOSE: 1 prints captured logs.
+#   EXAM_CONFIG_PATH: daemon config YAML path.
+#   LD_LIBRARY_PATH: runtime library search path.
+
 cd "$(dirname "$0")"
 
-source ./scripts/realtime_sudo.sh
-exam_require_passwordless_sudo "[01]"
+source ./scripts/sudo_helpers.sh
 
 DAEMON_LOG=${DAEMON_LOG:-/tmp/exam_daemon_resnet18_three_process.log}
 PROCESS_1_LOG=${PROCESS_1_LOG:-/tmp/exam_resnet18_process_1.log}
 PROCESS_2_LOG=${PROCESS_2_LOG:-/tmp/exam_resnet18_process_2.log}
 PROCESS_3_LOG=${PROCESS_3_LOG:-/tmp/exam_resnet18_process_3.log}
-SG_SEQUENCE_PATH=${SG_SEQUENCE_PATH:-artifacts/resnet18/sg_sequence.json}
+SG_SEQUENCE_PATH=${SG_SEQUENCE_PATH:-artifacts/resnet18/sg_sequence_tensor_rt_gpu.json}
+SCHED_FIFO=${SCHED_FIFO:-1}
 VERBOSE=${VERBOSE:-0}
 daemon_pid=""
+daemon_wrapper_pid=""
+daemon_pid_file=""
 process_pids=()
+terminal_state=""
+disable_sched_fifo=1
+if [[ "$SCHED_FIFO" == "1" ]]; then
+    exam_require_passwordless_sudo "[01]"
+    disable_sched_fifo=0
+fi
+if [[ -t 0 ]]; then
+    terminal_state=$(stty -g 2>/dev/null || true)
+fi
 
 wait_for_pid_exit() {
     local pid=$1
@@ -52,16 +75,35 @@ terminate_pid() {
 
 cleanup_shm() {
     exam_rm -f /dev/shm/exam_event_queue \
+          /dev/shm/exam_daemon_global_shm \
+          /dev/shm/exam_daemon_shm \
+          /dev/shm/exam_request_queue \
           /dev/shm/exam_channel_* \
           /dev/shm/exam_client_control_*
+}
+
+stop_daemon() {
+    terminate_pid "$daemon_pid" "exam_daemon"
+    daemon_pid=""
+    if [[ -n "$daemon_wrapper_pid" ]]; then
+        wait "$daemon_wrapper_pid" 2>/dev/null || true
+        daemon_wrapper_pid=""
+    fi
+    if [[ -n "$daemon_pid_file" ]]; then
+        rm -f "$daemon_pid_file" 2>/dev/null || true
+        daemon_pid_file=""
+    fi
 }
 
 cleanup() {
     for pid in "${process_pids[@]}"; do
         terminate_pid "$pid" "resnet18_process"
     done
-    terminate_pid "$daemon_pid" "exam_daemon"
+    stop_daemon
     cleanup_shm
+    if [[ -n "$terminal_state" ]]; then
+        stty "$terminal_state" 2>/dev/null || true
+    fi
 }
 trap cleanup EXIT
 
@@ -109,26 +151,67 @@ ensure_built() {
     ./build.sh
 }
 
+start_daemon() {
+    cleanup_shm
+    daemon_pid=""
+    daemon_wrapper_pid=""
+    daemon_pid_file=""
+
+    if [[ ${#EXAM_SUDO[@]} -eq 0 ]]; then
+        env \
+            EXAM_CONFIG_PATH="${EXAM_CONFIG_PATH:-}" \
+            LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" \
+            EXAM_DISABLE_SCHED_FIFO="$disable_sched_fifo" \
+            ./exam_daemon mock-fifo > "$DAEMON_LOG" 2>&1 < /dev/null &
+        daemon_pid=$!
+    else
+        daemon_pid_file=$(mktemp /tmp/exam_daemon_pid.XXXXXX)
+        rm -f "$daemon_pid_file"
+        "${EXAM_SUDO[@]}" env \
+            EXAM_DAEMON_PID_FILE="$daemon_pid_file" \
+            EXAM_CONFIG_PATH="${EXAM_CONFIG_PATH:-}" \
+            LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" \
+            EXAM_DISABLE_SCHED_FIFO="$disable_sched_fifo" \
+            bash -c 'echo $$ > "$EXAM_DAEMON_PID_FILE"; exec ./exam_daemon mock-fifo' \
+            > "$DAEMON_LOG" 2>&1 < /dev/null &
+        daemon_wrapper_pid=$!
+        for _ in $(seq 1 100); do
+            if [[ -s "$daemon_pid_file" ]]; then
+                daemon_pid=$(cat "$daemon_pid_file")
+                break
+            fi
+            sleep 0.01
+        done
+        if [[ -z "$daemon_pid" ]]; then
+            echo "timed out waiting for daemon pid file" >&2
+            return 1
+        fi
+    fi
+
+    wait_for_daemon_ready
+}
+
+start_process() {
+    local input_id=$1
+    local log_file=$2
+
+    "${EXAM_SUDO[@]}" env \
+        EXAM_DISABLE_SCHED_FIFO="$disable_sched_fifo" \
+        ./resnet18_process "$input_id" "$SG_SEQUENCE_PATH" \
+        > "$log_file" 2>&1 < /dev/null &
+    process_pids+=("$!")
+}
+
 cleanup_shm
 
 ensure_built
 
-"${EXAM_SUDO[@]}" env EXAM_CONFIG_PATH="${EXAM_CONFIG_PATH:-}" \
-    LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" \
-    ./exam_daemon mock-fifo > "$DAEMON_LOG" 2>&1 &
-daemon_pid=$!
-wait_for_daemon_ready
+start_daemon
 
 process_pids=()
-"${EXAM_SUDO[@]}" ./resnet18_process 1 "$SG_SEQUENCE_PATH" \
-    > "$PROCESS_1_LOG" 2>&1 &
-process_pids+=("$!")
-"${EXAM_SUDO[@]}" ./resnet18_process 2 "$SG_SEQUENCE_PATH" \
-    > "$PROCESS_2_LOG" 2>&1 &
-process_pids+=("$!")
-"${EXAM_SUDO[@]}" ./resnet18_process 3 "$SG_SEQUENCE_PATH" \
-    > "$PROCESS_3_LOG" 2>&1 &
-process_pids+=("$!")
+start_process 1 "$PROCESS_1_LOG"
+start_process 2 "$PROCESS_2_LOG"
+start_process 3 "$PROCESS_3_LOG"
 
 statuses=()
 for pid in "${process_pids[@]}"; do
@@ -141,8 +224,7 @@ done
 process_pids=()
 
 sleep 1
-terminate_pid "$daemon_pid" "exam_daemon"
-daemon_pid=""
+stop_daemon
 
 hash1=$(extract_output_hash "$PROCESS_1_LOG")
 hash2=$(extract_output_hash "$PROCESS_2_LOG")

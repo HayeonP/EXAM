@@ -167,7 +167,7 @@ def make_input(input_id: int) -> torch.Tensor:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("input_id", type=int, nargs="?", default=300)
-    parser.add_argument("ts_dir", nargs="?", default="artifacts/resnet18/pytorch_ts")
+    parser.add_argument("ts_dir", nargs="?", default="artifacts/resnet18/pytorch")
     parser.add_argument("warmup", type=int, nargs="?", default=5)
     parser.add_argument("iterations", type=int, nargs="?", default=10)
     return parser.parse_args()

@@ -404,7 +404,7 @@ void PyTorchWorker::execute() {
     std::int64_t input_prepare_us = 0;
     std::int64_t output_payload_us = 0;
 
-    if (current_sg().is_first()) {
+    if (has_prepared_input()) {
         const auto input_prepare_started_at = Clock::now();
         at::Tensor input_tensor =
             payload_to_tensor(input_, module.input_shape(), module.input_dtype());
@@ -446,6 +446,13 @@ void PyTorchWorker::execute() {
 
 Payload PyTorchWorker::get_output() {
     std::lock_guard<std::mutex> lock(cache_mutex_);
+    auto previous_executor = last_executor_by_request_.find(current_request_key());
+    if (previous_executor != last_executor_by_request_.end()) {
+        Payload output = tensor_to_payload(previous_executor->second->output());
+        last_executor_by_request_.erase(previous_executor);
+        return output;
+    }
+
     return output_;
 }
 

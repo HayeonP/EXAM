@@ -1,6 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
+# Usage: ./terminate.sh [mode]
+# Inputs:
+#   no argument: same as --all.
+#   --all: kill daemon/clients and clean EXAM shm.
+#   --daemon: kill daemon only and clean EXAM shm.
+#   --shm-only: clean EXAM shm only.
+#   -h: print usage.
+#   --help: print usage.
+
 cd "$(dirname "$0")"
 
 MODE=${1:---all}

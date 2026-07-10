@@ -1,6 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
+# Usage: VAR=value ./build.sh
+# Inputs:
+#   CXX: C++ compiler command.
+#   ENABLE_PYTORCH: 1 builds PyTorch worker/direct binaries.
+#   TORCH_PREFIX: LibTorch or Python torch root prefix.
+#   TORCH_INCLUDE_DIR: explicit torch include directory.
+#   TORCH_LIB_DIR: explicit torch library directory.
+#   PYTORCH_CXXFLAGS_EXTRA: extra PyTorch compile flags.
+#   PYTORCH_LDFLAGS_EXTRA: extra PyTorch link flags.
+
 CXX=${CXX:-g++}
 CXXFLAGS=(-std=c++17 -Wall -Wextra -pedantic -O2 -pthread -Iinclude -I/usr/local/cuda/targets/aarch64-linux/include)
 TENSOR_RT_LDFLAGS=(-L/usr/local/cuda/targets/aarch64-linux/lib -lnvinfer -lnvinfer_plugin -lcudart)
@@ -8,6 +18,8 @@ ENABLE_PYTORCH=${ENABLE_PYTORCH:-0}
 PYTORCH_SRCS=()
 PYTORCH_CXXFLAGS=()
 PYTORCH_LDFLAGS=()
+OPENCV_CXXFLAGS=()
+OPENCV_LDFLAGS=()
 
 append_env_words() {
     local value=$1
@@ -88,9 +100,46 @@ PY
     exit 1
 }
 
+configure_opencv() {
+    local include_dir=""
+    for candidate in /usr/include/opencv4 /usr/local/include/opencv4; do
+        if [[ -f "$candidate/opencv2/imgcodecs.hpp" ]]; then
+            include_dir=$candidate
+            break
+        fi
+    done
+
+    if [[ -n "$include_dir" ]]; then
+        local imgcodecs_lib
+        local imgproc_lib
+        local core_lib
+        imgcodecs_lib=$(find /usr/lib /usr/local/lib -name 'libopencv_imgcodecs.so*' -print 2>/dev/null | sort -V | tail -n 1)
+        imgproc_lib=$(find /usr/lib /usr/local/lib -name 'libopencv_imgproc.so*' -print 2>/dev/null | sort -V | tail -n 1)
+        core_lib=$(find /usr/lib /usr/local/lib -name 'libopencv_core.so*' -print 2>/dev/null | sort -V | tail -n 1)
+        if [[ -n "$imgcodecs_lib" && -n "$imgproc_lib" && -n "$core_lib" ]]; then
+            OPENCV_CXXFLAGS=(-I "$include_dir")
+            OPENCV_LDFLAGS=("$imgcodecs_lib" "$imgproc_lib" "$core_lib")
+            return
+        fi
+    fi
+
+    if ! pkg-config --exists opencv4; then
+        echo "OpenCV 4 is required to build resnet18_process image input support" >&2
+        exit 1
+    fi
+
+    local opencv_cflags
+    local opencv_ldflags
+    opencv_cflags=$(pkg-config --cflags opencv4)
+    opencv_ldflags=$(pkg-config --libs opencv4)
+    append_env_words "$opencv_cflags" OPENCV_CXXFLAGS
+    append_env_words "$opencv_ldflags" OPENCV_LDFLAGS
+}
+
 if [[ "$ENABLE_PYTORCH" == "1" ]]; then
     configure_pytorch
 fi
+configure_opencv
 
 COMMON_SRCS=(
     src/ipc/shared_memory_region.cpp
@@ -109,7 +158,7 @@ COMMON_SRCS=(
 )
 
 DAEMON_SRCS=(
-    apps/exam_daemon_main.cpp
+    apps/exam_daemon_example.cpp
     src/exam_daemon.cpp
     src/worker/worker.cpp
     src/worker/mock_worker.cpp
@@ -118,8 +167,7 @@ DAEMON_SRCS=(
 )
 
 "$CXX" "${CXXFLAGS[@]}" "${PYTORCH_CXXFLAGS[@]}" "${DAEMON_SRCS[@]}" "${COMMON_SRCS[@]}" -o exam_daemon -lrt "${TENSOR_RT_LDFLAGS[@]}" "${PYTORCH_LDFLAGS[@]}"
-"$CXX" "${CXXFLAGS[@]}" apps/process.cpp "${COMMON_SRCS[@]}" -o process -lrt
-"$CXX" "${CXXFLAGS[@]}" apps/resnet18_process.cpp "${COMMON_SRCS[@]}" -o resnet18_process -lrt
+"$CXX" "${CXXFLAGS[@]}" "${OPENCV_CXXFLAGS[@]}" apps/resnet18_process.cpp "${COMMON_SRCS[@]}" -o resnet18_process -lrt "${OPENCV_LDFLAGS[@]}"
 if [[ "$ENABLE_PYTORCH" == "1" ]]; then
     "$CXX" "${CXXFLAGS[@]}" "${PYTORCH_CXXFLAGS[@]}" \
         apps/resnet18_pytorch_direct.cpp \
@@ -128,4 +176,3 @@ if [[ "$ENABLE_PYTORCH" == "1" ]]; then
         -o resnet18_pytorch_direct -lrt "${PYTORCH_LDFLAGS[@]}"
 fi
 "$CXX" "${CXXFLAGS[@]}" apps/shared_memory_region_sample.cpp src/ipc/shared_memory_region.cpp -o shared_memory_region_sample -lrt
-"$CXX" "${CXXFLAGS[@]}" apps/build_sample_model.cpp -o build_sample_model "${TENSOR_RT_LDFLAGS[@]}"

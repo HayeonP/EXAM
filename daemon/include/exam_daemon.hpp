@@ -49,6 +49,8 @@ private:
         bool sg_running{false};
         std::uint32_t running_sg_id{0};
         std::chrono::steady_clock::time_point sg_started_at{};
+        Worker* previous_worker{nullptr};
+        Worker* current_worker{nullptr};
 
         bool has_next_sg() const;
         const Subgraph& peek_next_sg() const;
@@ -75,7 +77,11 @@ private:
     DispatchCandidate select_dispatch_candidate_mock_interleaving();
     Worker* select_worker(const Subgraph& sg);
     void dispatch_next_sg();
-    void launch(Worker& worker, const Request& request, const Subgraph& sg);
+    void launch(
+        Worker& worker,
+        const Request& request,
+        const Subgraph& sg,
+        Worker* migration_source_worker);
     bool client_has_active_request(const std::string& channel_name) const;
     void retain_sg_sequence(const ClientContext& client_context);
     std::size_t release_sg_sequence_reference(const ClientContext& client_context);

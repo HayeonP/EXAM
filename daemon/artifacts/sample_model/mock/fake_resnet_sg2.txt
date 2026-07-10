@@ -1,1 +1,0 @@
-mock fake_resnet_block1

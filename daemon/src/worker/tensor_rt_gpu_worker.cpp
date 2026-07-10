@@ -491,7 +491,7 @@ void TensorRtGpuWorker::execute() {
     const std::string request_key = current_request_key();
     auto current_executor = std::make_unique<TensorRtExecutor>(engine);
 
-    if (current_sg().is_first()) {
+    if (has_prepared_input()) {
         current_executor->copy_h2d(input_, stream_);
     } else {
         auto previous_executor = last_executor_by_request_.find(request_key);
@@ -512,6 +512,15 @@ void TensorRtGpuWorker::execute() {
 
 Payload TensorRtGpuWorker::get_output() {
     std::lock_guard<std::mutex> lock(cache_mutex_);
+    check_cuda(cudaSetDevice(device_id_), "cudaSetDevice");
+
+    auto previous_executor = last_executor_by_request_.find(current_request_key());
+    if (previous_executor != last_executor_by_request_.end()) {
+        Payload output = previous_executor->second->copy_d2h(stream_);
+        last_executor_by_request_.erase(previous_executor);
+        return output;
+    }
+
     return output_;
 }
 

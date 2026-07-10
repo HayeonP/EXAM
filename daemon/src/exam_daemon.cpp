@@ -557,6 +557,8 @@ void ExamDaemon::handle_submit_request_event(const Event& event) {
     request_context.next_sg_index = 0;
     request_context.sg_sequence = &client_it->second.sg_sequence;
     request_context.sg_running = false;
+    request_context.previous_worker = nullptr;
+    request_context.current_worker = nullptr;
 
     active_request_map_.emplace(key, std::move(request_context));
     dispatch_next_sg();
@@ -588,6 +590,8 @@ void ExamDaemon::handle_sg_complete_event(const Event& event) {
     }
 
     request_context.sg_running = false;
+    request_context.previous_worker = request_context.current_worker;
+    request_context.current_worker = nullptr;
     dispatch_next_sg();
 }
 
@@ -616,6 +620,9 @@ void ExamDaemon::handle_request_complete_event(const Event& event) {
                 << " sg_latency_us=" << sg_latency_us << '\n';
             std::cout << log.str();
         }
+        request_context.previous_worker = request_context.current_worker;
+        request_context.current_worker = nullptr;
+        request_context.sg_running = false;
         active_request_map_.erase(it);
         complete_client_request(channel_name);
     } catch (const std::exception& e) {
@@ -820,9 +827,17 @@ void ExamDaemon::dispatch_next_sg() {
         }
 
         const Subgraph& sg = candidate.request_context->take_next_sg();
+        Worker* migration_source_worker = nullptr;
+        if (!sg.is_first()
+            && candidate.request_context->previous_worker != nullptr
+            && candidate.request_context->previous_worker != candidate.worker) {
+            migration_source_worker = candidate.request_context->previous_worker;
+        }
+
         candidate.request_context->sg_running = true;
         candidate.request_context->running_sg_id = sg.id();
         candidate.request_context->sg_started_at = std::chrono::steady_clock::now();
+        candidate.request_context->current_worker = candidate.worker;
 
         {
             std::ostringstream log;
@@ -831,16 +846,29 @@ void ExamDaemon::dispatch_next_sg() {
                 << " request="
                 << candidate.request_context->request.request_id
                 << " sg=" << sg.id()
-                << " worker=" << candidate.worker->name() << '\n';
+                << " worker=" << candidate.worker->name();
+            if (migration_source_worker != nullptr) {
+                log << " migration_source_worker="
+                    << migration_source_worker->name();
+            }
+            log << '\n';
             std::cout << log.str();
         }
 
-        launch(*candidate.worker, candidate.request_context->request, sg);
+        launch(
+            *candidate.worker,
+            candidate.request_context->request,
+            sg,
+            migration_source_worker);
     }
 }
 
-void ExamDaemon::launch(Worker& worker, const Request& request, const Subgraph& sg) {
-    worker.assign(request, sg);
+void ExamDaemon::launch(
+    Worker& worker,
+    const Request& request,
+    const Subgraph& sg,
+    Worker* migration_source_worker) {
+    worker.assign(request, sg, migration_source_worker);
 }
 
 bool ExamDaemon::client_has_active_request(const std::string& channel_name) const {

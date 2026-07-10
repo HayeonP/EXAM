@@ -24,7 +24,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-constexpr const char* DEFAULT_TS_DIR = "artifacts/resnet18/pytorch_ts";
+constexpr const char* DEFAULT_TS_DIR = "artifacts/resnet18/pytorch";
 constexpr std::size_t RESNET18_INPUT_FLOATS = 1 * 3 * 224 * 224;
 constexpr std::uint64_t FNV_OFFSET = 14695981039346656037ULL;
 constexpr std::uint64_t FNV_PRIME = 1099511628211ULL;
@@ -72,6 +72,19 @@ int parse_positive_int(int argc, char** argv, int index, int default_value) {
     char* end = nullptr;
     const long parsed = std::strtol(argv[index], &end, 10);
     if (end == argv[index] || parsed <= 0) {
+        return default_value;
+    }
+    return static_cast<int>(parsed);
+}
+
+int parse_nonnegative_int(int argc, char** argv, int index, int default_value) {
+    if (argc <= index) {
+        return default_value;
+    }
+
+    char* end = nullptr;
+    const long parsed = std::strtol(argv[index], &end, 10);
+    if (end == argv[index] || parsed < 0) {
         return default_value;
     }
     return static_cast<int>(parsed);
@@ -207,7 +220,7 @@ int main(int argc, char** argv) {
 
         const int input_id = parse_positive_int(argc, argv, 1, 300);
         const std::string ts_dir = optional_arg(argc, argv, 2, DEFAULT_TS_DIR);
-        const int warmup = parse_positive_int(argc, argv, 3, 5);
+        const int warmup = parse_nonnegative_int(argc, argv, 3, 5);
         const int iterations = parse_positive_int(argc, argv, 4, 10);
         const int total = warmup + iterations;
 

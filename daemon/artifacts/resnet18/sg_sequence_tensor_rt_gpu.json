@@ -1,0 +1,26 @@
+[
+  {
+    "label": "resnet18_stem_layer1",
+    "tensor_rt_gpu": {
+      "path": "tensor_rt_gpu/sg1.plan",
+      "input": { "shape": [1, 3, 224, 224], "dtype": "float32" },
+      "output": { "shape": [1, 64, 56, 56], "dtype": "float32" }
+    }
+  },
+  {
+    "label": "resnet18_layer2_layer3",
+    "tensor_rt_gpu": {
+      "path": "tensor_rt_gpu/sg2.plan",
+      "input": { "shape": [1, 64, 56, 56], "dtype": "float32" },
+      "output": { "shape": [1, 256, 14, 14], "dtype": "float32" }
+    }
+  },
+  {
+    "label": "resnet18_layer4_fc",
+    "tensor_rt_gpu": {
+      "path": "tensor_rt_gpu/sg3.plan",
+      "input": { "shape": [1, 256, 14, 14], "dtype": "float32" },
+      "output": { "shape": [1, 1000], "dtype": "float32" }
+    }
+  }
+]
